@@ -2,6 +2,12 @@
 
 A React Native mobile wallet implementing the [Cashu ecash protocol](https://github.com/cashubtc/nuts) with **offline-first architecture**.
 
+########################  NUTNOVEMBER 2025 ########################
+
+This repo was made specifically for the #NutNovember Cashu hackathon challenge.
+
+######################## ----------------- ########################
+
 ## Key Features
 
 - **Offline Payments** - Send/receive Bitcoin without internet via Offline Cash Reserve (OCR)
