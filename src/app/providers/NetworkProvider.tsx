@@ -26,14 +26,65 @@
  * ```
  */
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import NetworkStateProvider, {
-  NetworkState,
-  NetworkEvent,
-  NetworkEventData,
-  ConnectionType,
-  ConnectionQuality,
-} from '../../core/network/NetworkStateProvider';
+import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+
+/**
+ * Connection type - defined locally to avoid circular dependencies
+ */
+export enum ConnectionType {
+  NONE = 'none',
+  WIFI = 'wifi',
+  CELLULAR = 'cellular',
+  BLUETOOTH = 'bluetooth',
+  ETHERNET = 'ethernet',
+  UNKNOWN = 'unknown',
+}
+
+/**
+ * Connection quality
+ */
+export enum ConnectionQuality {
+  EXCELLENT = 'excellent',
+  GOOD = 'good',
+  FAIR = 'fair',
+  POOR = 'poor',
+  VERY_POOR = 'very_poor',
+  UNKNOWN = 'unknown',
+}
+
+/**
+ * Network event types
+ */
+export enum NetworkEvent {
+  CONNECTION_CHANGED = 'connection_changed',
+  CONNECTED = 'connected',
+  DISCONNECTED = 'disconnected',
+  QUALITY_CHANGED = 'quality_changed',
+  TYPE_CHANGED = 'type_changed',
+}
+
+/**
+ * Network state
+ */
+export interface NetworkState {
+  isConnected: boolean;
+  isInternetReachable: boolean;
+  type: ConnectionType;
+  quality: ConnectionQuality;
+  isMetered: boolean;
+  isWiFi: boolean;
+  isCellular: boolean;
+  timestamp: number;
+}
+
+/**
+ * Network event data
+ */
+export interface NetworkEventData {
+  type: NetworkEvent;
+  state: NetworkState;
+  timestamp: number;
+}
 
 /**
  * Network context value
@@ -58,46 +109,61 @@ interface NetworkProviderProps {
 }
 
 /**
+ * Default network state
+ */
+const defaultNetworkState: NetworkState = {
+  isConnected: false,
+  isInternetReachable: false,
+  type: ConnectionType.NONE,
+  quality: ConnectionQuality.UNKNOWN,
+  isMetered: true,
+  isWiFi: false,
+  isCellular: false,
+  timestamp: Date.now(),
+};
+
+/**
  * Network Provider Component
+ *
+ * Uses lazy loading to avoid circular dependency issues with
+ * NetworkStateProvider which has deep import chains.
  */
 export function NetworkProvider({ children }: NetworkProviderProps) {
-  const [networkState, setNetworkState] = useState<NetworkState>({
-    isConnected: false,
-    isInternetReachable: false,
-    type: ConnectionType.NONE,
-    quality: ConnectionQuality.UNKNOWN,
-    isMetered: true,
-    isWiFi: false,
-    isCellular: false,
-    timestamp: Date.now(),
-  });
-
-  const networkProvider = NetworkStateProvider.getInstance();
+  const [networkState, setNetworkState] = useState<NetworkState>(defaultNetworkState);
+  const providerRef = useRef<any>(null);
 
   useEffect(() => {
-    // Initialize network provider
+    // Lazy load the NetworkStateProvider to avoid circular dependencies
     const initialize = async () => {
       try {
-        await networkProvider.initialize();
+        // Dynamic import to break circular dependency
+        const NetworkStateProviderModule = await import('../../core/network/NetworkStateProvider');
+        const NetworkStateProvider = NetworkStateProviderModule.default || NetworkStateProviderModule.NetworkStateProvider;
+        providerRef.current = NetworkStateProvider.getInstance ? NetworkStateProvider.getInstance() : NetworkStateProvider;
+
+        await providerRef.current.initialize();
 
         // Get initial state
-        const initialState = networkProvider.getState();
+        const initialState = providerRef.current.getState();
         setNetworkState(initialState);
 
         // Listen for network changes
-        const handleNetworkEvent = (event: NetworkEventData) => {
+        const handleNetworkEvent = (event: any) => {
           setNetworkState(event.state);
         };
 
-        networkProvider.addEventListener(handleNetworkEvent);
+        providerRef.current.addEventListener(handleNetworkEvent);
 
         // Cleanup
         return () => {
-          networkProvider.removeEventListener(handleNetworkEvent);
-          networkProvider.shutdown();
+          if (providerRef.current) {
+            providerRef.current.removeEventListener(handleNetworkEvent);
+            providerRef.current.shutdown();
+          }
         };
       } catch (error) {
         console.error('[NetworkProvider] Initialization error:', error);
+        // Continue with defaults on error
       }
     };
 
@@ -106,9 +172,24 @@ export function NetworkProvider({ children }: NetworkProviderProps) {
 
   const contextValue: NetworkContextValue = {
     ...networkState,
-    hasGoodConnection: () => networkProvider.hasGoodConnection(),
-    testReachability: (url: string) => networkProvider.testReachability(url),
-    waitForConnection: (timeoutMs?: number) => networkProvider.waitForConnection(timeoutMs),
+    hasGoodConnection: () => {
+      if (providerRef.current && providerRef.current.hasGoodConnection) {
+        return providerRef.current.hasGoodConnection();
+      }
+      return false;
+    },
+    testReachability: async (url: string) => {
+      if (providerRef.current && providerRef.current.testReachability) {
+        return providerRef.current.testReachability(url);
+      }
+      return false;
+    },
+    waitForConnection: async (timeoutMs?: number) => {
+      if (providerRef.current && providerRef.current.waitForConnection) {
+        return providerRef.current.waitForConnection(timeoutMs);
+      }
+      return false;
+    },
   };
 
   return (
@@ -131,8 +212,5 @@ export function useNetwork(): NetworkContextValue {
   return context;
 }
 
-/**
- * Re-export types for convenience
- */
-export { ConnectionType, ConnectionQuality, NetworkEvent };
-export type { NetworkState, NetworkEventData };
+// ConnectionType, ConnectionQuality, NetworkEvent, NetworkState, NetworkEventData
+// are already exported above

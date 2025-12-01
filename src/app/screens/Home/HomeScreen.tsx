@@ -8,7 +8,7 @@
  * - Quick actions (Send, Receive)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { theme } from '../../theme';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
@@ -35,10 +35,12 @@ export function HomeScreen() {
   const [recentTxs, setRecentTxs] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      // Load balance
-      const stats = ProofRepository.getInstance().getStats();
+      // Load balance from proofs
+      const proofRepo = ProofRepository.getInstance();
+      const stats = proofRepo.getStats();
+      console.log('[HomeScreen] Balance stats:', stats);
       setBalance(stats.totalValue);
 
       // Load OCR status
@@ -53,11 +55,15 @@ export function HomeScreen() {
     } catch (error) {
       console.error('[HomeScreen] Load error:', error);
     }
-  };
-
-  useEffect(() => {
-    loadData();
   }, []);
+
+  // Reload data when screen comes into focus (after returning from Receive/Send)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[HomeScreen] Screen focused, reloading data...');
+      loadData();
+    }, [loadData])
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -106,7 +112,7 @@ export function HomeScreen() {
         <OCRStatusIndicator
           status={ocrStatus.status}
           currentBalance={ocrStatus.currentBalance}
-          targetBalance={ocrStatus.targetAmount}
+          targetBalance={ocrStatus.targetBalance}
           style={styles.ocrIndicator}
         />
       )}

@@ -70,6 +70,8 @@ export type ReceiveStackParamList = {
     amount: number;
     transactionId: string;
   };
+  MintAdd: undefined;
+  MintDiscovery: undefined;
 };
 
 /**
@@ -101,6 +103,7 @@ export type SettingsStackParamList = {
   SettingsMain: undefined;
   OCRConfiguration: undefined;
   MintManagement: undefined;
+  MintDiscovery: undefined;
   MintAdd: undefined;
   MintDetails: {
     mintId: string;

@@ -10,18 +10,23 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SettingsStackParamList } from './types';
 import { theme } from '../theme';
 
-// Screens
-import SettingsMainScreen from '../screens/Settings/SettingsMainScreen';
-import OCRConfigurationScreen from '../screens/Settings/OCRConfigurationScreen';
-import MintManagementScreen from '../screens/Settings/MintManagementScreen';
-import MintAddScreen from '../screens/Settings/MintAddScreen';
-import MintDetailsScreen from '../screens/Settings/MintDetailsScreen';
-import TransportSelectionScreen from '../screens/Settings/TransportSelectionScreen';
-import BackupRecoveryScreen from '../screens/Settings/BackupRecoveryScreen';
-import BackupExportScreen from '../screens/Settings/BackupExportScreen';
-import BackupImportScreen from '../screens/Settings/BackupImportScreen';
-import SecurityScreen from '../screens/Settings/SecurityScreen';
-import AboutScreen from '../screens/Settings/AboutScreen';
+// Real Screens
+import { SettingsScreen } from '../screens/Settings/SettingsScreen';
+import { SecurityScreen } from '../screens/Settings/SecurityScreen';
+import { AboutScreen } from '../screens/Settings/AboutScreen';
+import { BackupRecoveryScreen } from '../screens/Settings/BackupRecoveryScreen';
+import { MintManagementScreen } from '../screens/Mints/MintManagementScreen';
+import { MintDiscoveryScreen } from '../screens/Mints/MintDiscoveryScreen';
+import { MintAddScreen } from '../screens/Mints/MintAddScreen';
+import { MintDetailsScreen } from '../screens/Mints/MintDetailsScreen';
+import { OCRConfigurationScreen } from '../screens/OCR/OCRConfigurationScreen';
+import { TransportSelectionScreen } from '../screens/Transport/TransportSelectionScreen';
+
+// Placeholder Screens (to be implemented)
+import {
+  BackupExportScreen,
+  BackupImportScreen,
+} from '../screens/PLACEHOLDER_SCREENS';
 
 const Stack = createNativeStackNavigator<SettingsStackParamList>();
 
@@ -44,7 +49,7 @@ export function SettingsNavigator() {
     >
       <Stack.Screen
         name="SettingsMain"
-        component={SettingsMainScreen}
+        component={SettingsScreen}
         options={{
           title: 'Settings',
         }}
@@ -63,6 +68,14 @@ export function SettingsNavigator() {
         component={MintManagementScreen}
         options={{
           title: 'Manage Mints',
+        }}
+      />
+
+      <Stack.Screen
+        name="MintDiscovery"
+        component={MintDiscoveryScreen}
+        options={{
+          title: 'Discover Mints',
         }}
       />
 

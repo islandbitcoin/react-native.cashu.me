@@ -18,6 +18,7 @@
  * Spacing scale (based on 4px grid)
  */
 export const spacing = {
+  none: 0,    // No spacing
   xs: 4,      // Extra small spacing
   sm: 8,      // Small spacing
   md: 12,     // Medium spacing

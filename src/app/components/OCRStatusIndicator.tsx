@@ -41,7 +41,10 @@ export function OCRStatusIndicator({
   showDetails = true,
   style,
 }: OCRStatusIndicatorProps) {
-  const percentage = targetBalance > 0 ? (currentBalance / targetBalance) * 100 : 0;
+  // Ensure values are valid numbers (defensive programming)
+  const safeCurrentBalance = currentBalance ?? 0;
+  const safeTargetBalance = targetBalance ?? 0;
+  const percentage = safeTargetBalance > 0 ? (safeCurrentBalance / safeTargetBalance) * 100 : 0;
   const statusColor = theme.getOCRStatusColor(status);
 
   const statusMessages: Record<OCRStatus, string> = {
@@ -74,7 +77,7 @@ export function OCRStatusIndicator({
             {/* Balance */}
             <View style={styles.balanceRow}>
               <Text style={[styles.balanceText, styles[`${size}BalanceText`]]}>
-                {currentBalance.toLocaleString()} / {targetBalance.toLocaleString()} sats
+                {safeCurrentBalance.toLocaleString()} / {safeTargetBalance.toLocaleString()} sats
               </Text>
               <Text style={[styles.percentageText, styles[`${size}PercentageText`], { color: statusColor }]}>
                 {percentage.toFixed(0)}%

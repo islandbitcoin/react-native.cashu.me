@@ -2030,4 +2030,4 @@ export class OCRManager {
  * const ocrManager = OCRManager.getInstance();
  * const status = ocrManager.getStatus();
  */
-export default OCRManager.getInstance();
+export default OCRManager;

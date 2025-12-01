@@ -568,4 +568,4 @@ export class OperationQueue {
 /**
  * Singleton instance export
  */
-export default OperationQueue.getInstance();
+export default OperationQueue;

@@ -26,8 +26,30 @@
  * ```
  */
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { OfflineModeManager, OfflineMode, OfflineCapabilities } from '../../core/network/OfflineModeManager';
+import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+
+/**
+ * Offline mode states - defined locally to avoid circular dependencies
+ */
+export enum OfflineMode {
+  ONLINE = 'online',
+  OFFLINE = 'offline',
+  SYNCING = 'syncing',
+  ERROR = 'error',
+}
+
+/**
+ * Offline capabilities - what can be done when offline
+ */
+export interface OfflineCapabilities {
+  canSend: boolean;
+  canReceive: boolean;
+  canViewBalance: boolean;
+  canViewHistory: boolean;
+  canGeneratePaymentRequest: boolean;
+  ocrAvailable: boolean;
+  ocrBalance: number;
+}
 
 /**
  * Offline mode context value
@@ -58,44 +80,65 @@ interface OfflineModeProviderProps {
 }
 
 /**
+ * Default capabilities when manager is not ready
+ */
+const defaultCapabilities: OfflineCapabilities = {
+  canSend: false,
+  canReceive: true,
+  canViewBalance: true,
+  canViewHistory: true,
+  canGeneratePaymentRequest: true,
+  ocrAvailable: false,
+  ocrBalance: 0,
+};
+
+/**
  * Offline Mode Provider Component
+ *
+ * Uses lazy loading to avoid circular dependency issues with
+ * OfflineModeManager which has deep import chains.
  */
 export function OfflineModeProvider({ children }: OfflineModeProviderProps) {
   const [mode, setMode] = useState<OfflineMode>(OfflineMode.OFFLINE);
-  const [capabilities, setCapabilities] = useState<OfflineCapabilities>({
-    canSend: false,
-    canReceive: true,
-    canViewBalance: true,
-    canViewHistory: true,
-    canGeneratePaymentRequest: true,
-    ocrAvailable: false,
-    ocrBalance: 0,
-  });
-
-  const offlineModeManager = OfflineModeManager.getInstance();
+  const [capabilities, setCapabilities] = useState<OfflineCapabilities>(defaultCapabilities);
+  const [offlineDuration, setOfflineDuration] = useState<number | null>(null);
+  const [timeSinceOnline, setTimeSinceOnline] = useState<number | null>(null);
+  const managerRef = useRef<any>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // Initialize offline mode manager
+    // Lazy load the OfflineModeManager to avoid circular dependencies
     const initialize = async () => {
       try {
-        await offlineModeManager.initialize();
+        // Dynamic import to break circular dependency
+        const { OfflineModeManager } = await import('../../core/network/OfflineModeManager');
+        managerRef.current = OfflineModeManager.getInstance();
+
+        await managerRef.current.initialize();
 
         // Update state periodically
         const interval = setInterval(() => {
-          const currentMode = offlineModeManager.getMode();
-          const currentCapabilities = offlineModeManager.getCapabilities();
+          if (managerRef.current) {
+            const currentMode = managerRef.current.getMode();
+            const currentCapabilities = managerRef.current.getCapabilities();
 
-          setMode(currentMode);
-          setCapabilities(currentCapabilities);
+            setMode(currentMode);
+            setCapabilities(currentCapabilities);
+            setOfflineDuration(managerRef.current.getOfflineDuration());
+            setTimeSinceOnline(managerRef.current.getTimeSinceOnline());
+          }
         }, 1000); // Update every second
 
         // Initial update
-        setMode(offlineModeManager.getMode());
-        setCapabilities(offlineModeManager.getCapabilities());
+        setMode(managerRef.current.getMode());
+        setCapabilities(managerRef.current.getCapabilities());
+        setIsInitialized(true);
 
         return () => clearInterval(interval);
       } catch (error) {
         console.error('[OfflineModeProvider] Initialization error:', error);
+        // Continue with defaults on error
+        setIsInitialized(true);
       }
     };
 
@@ -108,12 +151,25 @@ export function OfflineModeProvider({ children }: OfflineModeProviderProps) {
     isOffline: mode === OfflineMode.OFFLINE,
     isOnline: mode === OfflineMode.ONLINE,
     isSyncing: mode === OfflineMode.SYNCING,
-    offlineDuration: offlineModeManager.getOfflineDuration(),
-    timeSinceOnline: offlineModeManager.getTimeSinceOnline(),
-    queueOperation: (type, payload, priority) =>
-      offlineModeManager.queueOperation(type, payload, priority),
-    forceReconcile: () => offlineModeManager.forceReconcile(),
-    getHealth: () => offlineModeManager.getHealth(),
+    offlineDuration,
+    timeSinceOnline,
+    queueOperation: async (type, payload, priority) => {
+      if (managerRef.current) {
+        return managerRef.current.queueOperation(type, payload, priority);
+      }
+      return 'not-initialized';
+    },
+    forceReconcile: async () => {
+      if (managerRef.current) {
+        return managerRef.current.forceReconcile();
+      }
+    },
+    getHealth: () => {
+      if (managerRef.current) {
+        return managerRef.current.getHealth();
+      }
+      return { healthy: true, issues: [], warnings: ['Manager not initialized'] };
+    },
   };
 
   return (
@@ -136,8 +192,4 @@ export function useOfflineMode(): OfflineModeContextValue {
   return context;
 }
 
-/**
- * Re-export types for convenience
- */
-export { OfflineMode };
-export type { OfflineCapabilities };
+// OfflineMode and OfflineCapabilities are already exported above

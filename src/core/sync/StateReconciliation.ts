@@ -435,4 +435,4 @@ export class StateReconciliation {
 /**
  * Singleton instance export
  */
-export default StateReconciliation.getInstance();
+export default StateReconciliation;

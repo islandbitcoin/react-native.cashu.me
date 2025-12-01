@@ -105,7 +105,7 @@
  * @see {@link https://github.com/cashubtc/nuts} - Cashu protocol specification
  */
 
-import { CashuWallet, CashuMint, Proof as CashuProof, MintKeys } from '@cashu/cashu-ts';
+import { CashuWallet, CashuMint, Proof as CashuProof, MintKeys, getEncodedToken, getDecodedToken } from '@cashu/cashu-ts';
 import ProofRepository from '../../data/repositories/ProofRepository';
 import MintRepository from '../../data/repositories/MintRepository';
 import TransactionRepository from '../../data/repositories/TransactionRepository';
@@ -168,17 +168,15 @@ export interface SwapResult {
  * You provide proofs and a Lightning invoice, the mint pays the invoice
  * and destroys your proofs.
  *
- * @property isPaid - Whether the Lightning invoice was successfully paid
+ * @property paid - Whether the Lightning invoice was successfully paid
  * @property preimage - The Lightning payment preimage (proof of payment)
  * @property change - Any leftover proofs if input was more than invoice + fee
- * @property fee - The fee charged by the mint for the Lightning payment
  * @property transactionId - Unique ID for tracking this operation
  */
 export interface MeltResult {
-  isPaid: boolean;
+  paid: boolean;
   preimage?: string;
   change?: Proof[];
-  fee: number;
   transactionId: string;
 }
 
@@ -425,7 +423,7 @@ export class CashuWalletService {
     // The mint will return:
     // - quote: A unique ID for this minting request
     // - request: A Lightning invoice to pay
-    const { quote, request } = await wallet.getMintQuote(amount);
+    const { quote, request } = await wallet.createMintQuote(amount);
 
     return { quote, request };
   }
@@ -472,38 +470,48 @@ export class CashuWalletService {
     isOCR: boolean = false
   ): Promise<MintResult> {
     const wallet = await this.getWallet(mintUrl);
-    const transactionId = generateUUID();
+
+    // Create a transaction record BEFORE the operation
+    // This ensures we can track even failed operations
+    const transaction = await this.txRepo.create({
+      type: TransactionType.MINT,
+      amount,
+      mintUrl,
+      status: TransactionStatus.PENDING,
+      direction: TransactionDirection.INCOMING,
+      paymentRequest: quote,
+      proofCount: 0,
+    });
+    const transactionId = transaction.id;
 
     try {
-      // Create a transaction record BEFORE the operation
-      // This ensures we can track even failed operations
-      await this.txRepo.create({
-        type: TransactionType.RECEIVE,
-        amount,
-        mintUrl,
-        status: TransactionStatus.PENDING,
-        direction: TransactionDirection.INCOMING,
-        paymentRequest: quote,
-        proofCount: 0,
-      });
-
       // Request tokens from the mint
       // This is where the blind signature magic happens:
       // - We send blinded secrets to the mint
       // - Mint signs them and returns blinded signatures
       // - cashu-ts unblinds them for us automatically
-      const { proofs: cashuProofs } = await wallet.requestTokens(amount, quote);
+      console.log(`[CashuWalletService] Minting ${amount} sats with quote: ${quote}`);
+      const cashuProofs = await wallet.mintProofs(amount, quote);
+      console.log(`[CashuWalletService] Received ${cashuProofs.length} proofs from mint`);
 
       // Convert and store each proof in our database
       const proofs: Proof[] = [];
       for (const cashuProof of cashuProofs) {
         // Convert to our format with additional metadata
         const proofData = this.cashuProofToProof(cashuProof, mintUrl, ProofState.UNSPENT, isOCR);
+        console.log(`[CashuWalletService] Storing proof: amount=${proofData.amount}, keysetId=${proofData.keysetId}, state=${proofData.state}`);
 
         // Store in database - now we own these proofs!
         const proof = await this.proofRepo.create(proofData);
+        console.log(`[CashuWalletService] Proof stored with id: ${proof.id}`);
         proofs.push(proof);
       }
+
+      console.log(`[CashuWalletService] Stored ${proofs.length} proofs in database`);
+
+      // Verify proofs were stored by checking balance
+      const verifyStats = this.proofRepo.getStats();
+      console.log(`[CashuWalletService] Balance verification after mint:`, verifyStats);
 
       // Update transaction as completed
       await this.txRepo.update(transactionId, {
@@ -520,6 +528,7 @@ export class CashuWalletService {
     } catch (error: any) {
       // Mark transaction as failed for debugging/recovery
       await this.txRepo.markFailed(transactionId);
+      console.error(`[CashuWalletService] Mint failed:`, error);
       throw new Error(`Mint failed: ${error.message}`);
     }
   }
@@ -629,10 +638,9 @@ export class CashuWalletService {
 
       // Perform the swap with the mint
       // wallet.send() with same amount returns change as new proofs
-      const { returnChange: newCashuProofs } = await wallet.send(
+      const { keep: newCashuProofs } = await wallet.send(
         totalAmount,
-        cashuProofs,
-        targetAmounts
+        cashuProofs
       );
 
       // Store new proofs in database
@@ -765,8 +773,20 @@ export class CashuWalletService {
       // CASE 1: Exact amount found
       // We found proofs that sum exactly to the amount - no change needed!
       if (selection.change === 0) {
+        // Mark proofs as SPENT before sharing - they're being given away
+        for (const proof of selection.proofs) {
+          await this.proofRepo.transitionState(
+            proof.id,
+            ProofState.PENDING_SEND,
+            ProofState.SPENT,
+            transactionId
+          );
+        }
+
         await this.txRepo.update(transactionId, {
           proofCount: selection.proofs.length,
+          status: TransactionStatus.COMPLETED,
+          completedAt: Date.now(),
         });
 
         return {
@@ -781,19 +801,19 @@ export class CashuWalletService {
 
       // wallet.send() splits proofs into:
       // - send: Proofs totaling exactly the requested amount
-      // - returnChange: Leftover proofs that stay with us
-      const { send: sendProofs, returnChange: changeProofs } = await wallet.send(
+      // - keep: Leftover proofs that stay with us (change)
+      const { send: sendProofs, keep: changeProofs } = await wallet.send(
         amount,
         cashuProofs
       );
 
-      // Store the proofs to send (marked as PENDING_SEND)
+      // Store the proofs to send (marked as SPENT - they're being given away)
       const proofs: Proof[] = [];
       for (const cashuProof of sendProofs) {
         const proofData = this.cashuProofToProof(
           cashuProof,
           mintUrl,
-          ProofState.PENDING_SEND,
+          ProofState.SPENT,  // Mark as SPENT immediately since we're sharing them
           useOCR
         );
         const proof = await this.proofRepo.create(proofData);
@@ -823,9 +843,11 @@ export class CashuWalletService {
         );
       }
 
-      // Update transaction
+      // Update transaction as completed
       await this.txRepo.update(transactionId, {
         proofCount: proofs.length,
+        status: TransactionStatus.COMPLETED,
+        completedAt: Date.now(),
       });
 
       return {
@@ -916,6 +938,173 @@ export class CashuWalletService {
   }
 
   // =========================================================================
+  // MELT OPERATIONS (Lightning Payments)
+  // =========================================================================
+  // These methods allow paying Lightning invoices with ecash.
+
+  /**
+   * Get a quote for melting proofs to pay a Lightning invoice.
+   *
+   * Before paying a Lightning invoice, you need to get a quote from the mint
+   * to know the exact amount and fees required.
+   *
+   * @param mintUrl - The mint URL to melt from
+   * @param invoice - The Lightning invoice to pay (bolt11)
+   * @returns Quote with amount, fee reserve, and quote ID
+   *
+   * @example
+   * ```typescript
+   * const quote = await cashu.getMeltQuote(mintUrl, 'lnbc100n1...');
+   * console.log(`Amount: ${quote.amount}, Fee: ${quote.feeReserve}`);
+   * ```
+   */
+  async getMeltQuote(mintUrl: string, invoice: string): Promise<{
+    quote: string;
+    amount: number;
+    feeReserve: number;
+    state: string;
+    expiry: number;
+  }> {
+    const wallet = await this.getWallet(mintUrl);
+
+    try {
+      const quote = await wallet.createMeltQuote(invoice);
+
+      return {
+        quote: quote.quote,
+        amount: quote.amount,
+        feeReserve: quote.fee_reserve,
+        state: quote.state,
+        expiry: quote.expiry || Date.now() + 600000, // Default 10 min expiry
+      };
+    } catch (error: any) {
+      console.error('[CashuWalletService] getMeltQuote failed:', error);
+      throw new Error(`Failed to get melt quote: ${error.message}`);
+    }
+  }
+
+  /**
+   * Melt proofs to pay a Lightning invoice.
+   *
+   * This converts ecash back to Lightning by:
+   * 1. Selecting proofs that cover amount + fee
+   * 2. Sending proofs to the mint
+   * 3. Mint pays the Lightning invoice
+   * 4. Any excess is returned as change proofs
+   *
+   * @param mintUrl - The mint URL to melt from
+   * @param invoice - The Lightning invoice to pay
+   * @param quoteId - The quote ID from getMeltQuote
+   * @returns Result with payment status, preimage, and change proofs
+   *
+   * @example
+   * ```typescript
+   * const quote = await cashu.getMeltQuote(mintUrl, invoice);
+   * const result = await cashu.melt(mintUrl, invoice, quote.quote);
+   * if (result.paid) {
+   *   console.log('Payment successful! Preimage:', result.preimage);
+   * }
+   * ```
+   */
+  async melt(
+    mintUrl: string,
+    invoice: string,
+    quoteId: string
+  ): Promise<{
+    paid: boolean;
+    preimage?: string;
+    change?: Proof[];
+    transactionId: string;
+  }> {
+    const wallet = await this.getWallet(mintUrl);
+    const transactionId = generateUUID();
+
+    try {
+      // Get the quote to know how much we need
+      const quote = await wallet.checkMeltQuote(quoteId);
+      const totalNeeded = quote.amount + quote.fee_reserve;
+
+      console.log(`[CashuWalletService] Melting ${quote.amount} sats + ${quote.fee_reserve} fee reserve`);
+
+      // Create transaction record
+      await this.txRepo.create({
+        type: TransactionType.MELT,
+        amount: quote.amount,
+        mintUrl,
+        status: TransactionStatus.PENDING,
+        direction: TransactionDirection.OUTGOING,
+        paymentRequest: invoice,
+        proofCount: 0,
+      });
+
+      // Select proofs for the total amount (amount + fee reserve)
+      const selection = await this.proofRepo.selectProofsForAmount(
+        mintUrl,
+        totalNeeded,
+        transactionId,
+        false
+      );
+
+      // Convert to cashu-ts format
+      const cashuProofs = selection.proofs.map(p => this.proofToCashuProof(p));
+
+      // Execute the melt (cast quote since checkMeltQuote returns a partial response)
+      const meltResponse = await wallet.meltProofs(quote as any, cashuProofs);
+
+      console.log(`[CashuWalletService] Melt response:`, {
+        paid: meltResponse.quote?.state === 'PAID',
+        hasPreimage: !!meltResponse.quote?.payment_preimage,
+        changeCount: meltResponse.change?.length || 0,
+      });
+
+      // Mark original proofs as spent
+      for (const proof of selection.proofs) {
+        await this.proofRepo.transitionState(
+          proof.id,
+          ProofState.PENDING_SEND,
+          ProofState.SPENT,
+          transactionId
+        );
+      }
+
+      // Store change proofs if any
+      const changeProofs: Proof[] = [];
+      if (meltResponse.change && meltResponse.change.length > 0) {
+        for (const cashuProof of meltResponse.change) {
+          const proofData = this.cashuProofToProof(
+            cashuProof,
+            mintUrl,
+            ProofState.UNSPENT,
+            false
+          );
+          const proof = await this.proofRepo.create(proofData);
+          changeProofs.push(proof);
+        }
+        console.log(`[CashuWalletService] Received ${changeProofs.length} change proofs`);
+      }
+
+      // Update transaction
+      const paid = meltResponse.quote?.state === 'PAID';
+      await this.txRepo.update(transactionId, {
+        status: paid ? TransactionStatus.COMPLETED : TransactionStatus.FAILED,
+        completedAt: Date.now(),
+        proofCount: selection.proofs.length,
+      });
+
+      return {
+        paid,
+        preimage: meltResponse.quote?.payment_preimage || undefined,
+        change: changeProofs.length > 0 ? changeProofs : undefined,
+        transactionId,
+      };
+    } catch (error: any) {
+      console.error('[CashuWalletService] Melt failed:', error);
+      await this.txRepo.markFailed(transactionId);
+      throw new Error(`Melt failed: ${error.message}`);
+    }
+  }
+
+  // =========================================================================
   // RECEIVE OPERATIONS
   // =========================================================================
   // These methods handle receiving ecash from other users.
@@ -992,7 +1181,7 @@ export class CashuWalletService {
       // Receive proofs from the mint
       // This swaps the token's proofs for new proofs that only we know
       // The mint validates the original proofs and issues fresh ones
-      const { proofs: cashuProofs } = await wallet.receive(decoded);
+      const cashuProofs = await wallet.receive(decoded);
 
       // Store received proofs in our database
       const proofs: Proof[] = [];
@@ -1018,203 +1207,6 @@ export class CashuWalletService {
     } catch (error: any) {
       await this.txRepo.markFailed(transactionId);
       throw new Error(`Receive failed: ${error.message}`);
-    }
-  }
-
-  // =========================================================================
-  // MELT OPERATIONS (Lightning Payments)
-  // =========================================================================
-  // Melting converts ecash back to Lightning for paying invoices.
-
-  /**
-   * Get a quote for paying a Lightning invoice (melting).
-   *
-   * Before melting tokens to pay a Lightning invoice, you need to get
-   * a quote from the mint. The quote tells you:
-   * - The amount you need to pay (in sats)
-   * - The fee the mint will charge
-   * - A quote ID for the melt operation
-   *
-   * @param mintUrl - The URL of the Cashu mint
-   * @param invoice - The Lightning invoice (BOLT11) to pay
-   * @returns Quote with ID, amount, and fee
-   *
-   * @throws Error if invoice is invalid or mint can't pay it
-   *
-   * @example
-   * ```typescript
-   * const invoice = 'lnbc100u1p3...';  // Lightning invoice
-   *
-   * const quote = await cashu.getMeltQuote(
-   *   'https://mint.example.com',
-   *   invoice
-   * );
-   *
-   * console.log(`Amount: ${quote.amount} sats`);
-   * console.log(`Fee: ${quote.fee} sats`);
-   * console.log(`Total needed: ${quote.amount + quote.fee} sats`);
-   * ```
-   */
-  async getMeltQuote(
-    mintUrl: string,
-    invoice: string
-  ): Promise<{ quote: string; amount: number; fee: number }> {
-    const wallet = await this.getWallet(mintUrl);
-
-    // Get quote from mint
-    // The mint decodes the invoice and calculates the fee
-    const { quote, amount, fee_reserve } = await wallet.getMeltQuote(invoice);
-
-    return {
-      quote,
-      amount,
-      fee: fee_reserve,
-    };
-  }
-
-  /**
-   * Melt tokens to pay a Lightning invoice.
-   *
-   * This is how you "cash out" ecash to pay real Lightning invoices.
-   * You provide proofs and an invoice, the mint:
-   * 1. Validates and consumes your proofs
-   * 2. Pays the Lightning invoice
-   * 3. Returns any change (if proofs > invoice + fee)
-   *
-   * MELT vs SEND:
-   * - Send: Transfer ecash to another Cashu user
-   * - Melt: Convert ecash to Lightning payment
-   *
-   * @param mintUrl - The URL of the Cashu mint
-   * @param invoice - The Lightning invoice to pay
-   * @param proofIds - IDs of proofs to use for payment
-   * @returns MeltResult with payment status and any change
-   *
-   * @throws Error if insufficient proofs, invalid invoice, or payment fails
-   *
-   * @example
-   * ```typescript
-   * // Get a quote first
-   * const quote = await cashu.getMeltQuote(mintUrl, invoice);
-   * const totalNeeded = quote.amount + quote.fee;
-   *
-   * // Select proofs covering the total
-   * const proofIds = selectProofsForAmount(totalNeeded);
-   *
-   * // Melt to pay the invoice
-   * const result = await cashu.melt(mintUrl, invoice, proofIds);
-   *
-   * if (result.isPaid) {
-   *   console.log('Invoice paid! Preimage:', result.preimage);
-   *   if (result.change) {
-   *     console.log(`Got ${result.change.length} change proofs back`);
-   *   }
-   * }
-   * ```
-   */
-  async melt(
-    mintUrl: string,
-    invoice: string,
-    proofIds: string[]
-  ): Promise<MeltResult> {
-    const wallet = await this.getWallet(mintUrl);
-    const transactionId = generateUUID();
-
-    try {
-      // Get proofs from database
-      const proofs: Proof[] = [];
-      for (const id of proofIds) {
-        const proof = await this.proofRepo.getById(id);
-        if (!proof) throw new Error(`Proof ${id} not found`);
-        proofs.push(proof);
-      }
-
-      const totalAmount = proofs.reduce((sum, p) => sum + p.amount, 0);
-
-      // Create transaction record
-      await this.txRepo.create({
-        type: TransactionType.LIGHTNING,
-        amount: totalAmount,
-        mintUrl,
-        status: TransactionStatus.PENDING,
-        direction: TransactionDirection.OUTGOING,
-        paymentRequest: invoice,
-        proofCount: proofs.length,
-      });
-
-      // Mark proofs as pending
-      for (const proof of proofs) {
-        await this.proofRepo.transitionState(
-          proof.id,
-          ProofState.UNSPENT,
-          ProofState.PENDING_SEND,
-          transactionId
-        );
-      }
-
-      // Convert to Cashu library format
-      const cashuProofs = proofs.map(p => this.proofToCashuProof(p));
-
-      // Melt tokens to pay the Lightning invoice
-      // The mint will:
-      // 1. Validate our proofs
-      // 2. Pay the Lightning invoice
-      // 3. Return change if proofs > invoice + fee
-      const result = await wallet.meltTokens({
-        proofs: cashuProofs,
-        invoice,
-      });
-
-      // Mark proofs as spent (mint has consumed them)
-      for (const proof of proofs) {
-        await this.proofRepo.transitionState(
-          proof.id,
-          ProofState.PENDING_SEND,
-          ProofState.SPENT,
-          transactionId
-        );
-      }
-
-      // Store any change proofs
-      let change: Proof[] | undefined;
-      if (result.change && result.change.length > 0) {
-        change = [];
-        for (const cashuProof of result.change) {
-          const proofData = this.cashuProofToProof(
-            cashuProof,
-            mintUrl,
-            ProofState.UNSPENT,
-            false  // Change from melt is not OCR
-          );
-          const proof = await this.proofRepo.create(proofData);
-          change.push(proof);
-        }
-      }
-
-      // Mark transaction as completed
-      await this.txRepo.markCompleted(transactionId);
-
-      return {
-        isPaid: result.isPaid,
-        preimage: result.preimage,
-        change,
-        fee: result.fee_reserve || 0,
-        transactionId,
-      };
-    } catch (error: any) {
-      // Rollback: mark proofs as unspent again
-      // Note: This is only safe if the payment actually failed!
-      // If the payment succeeded but we crashed, proofs are actually spent.
-      for (const id of proofIds) {
-        await this.proofRepo.transitionState(
-          id,
-          ProofState.PENDING_SEND,
-          ProofState.UNSPENT
-        );
-      }
-
-      await this.txRepo.markFailed(transactionId);
-      throw new Error(`Melt failed: ${error.message}`);
     }
   }
 
@@ -1256,19 +1248,14 @@ export class CashuWalletService {
     // Convert to Cashu library format
     const cashuProofs = proofs.map(p => this.proofToCashuProof(p));
 
-    // Build the token structure
-    // Note: Multi-mint tokens are possible but we use single-mint here
+    // Build the token structure (v4 token format)
     const token = {
-      token: [
-        {
-          mint: mintUrl,
-          proofs: cashuProofs,
-        },
-      ],
+      mint: mintUrl,
+      proofs: cashuProofs,
     };
 
     // Use Cashu library to encode with proper prefix and formatting
-    return CashuWallet.getEncodedToken(token);
+    return getEncodedToken(token);
   }
 
   /**
@@ -1287,7 +1274,7 @@ export class CashuWalletService {
    * ```
    */
   decodeToken(token: string): any {
-    return CashuWallet.getDecodedToken(token);
+    return getDecodedToken(token);
   }
 
   // =========================================================================
@@ -1337,8 +1324,11 @@ export class CashuWalletService {
     const cashuProofs = proofs.map(p => this.proofToCashuProof(p));
 
     // Check with mint
-    // Returns array of booleans indicating if each proof is spent
-    const spendable = await wallet.checkProofsSpent(cashuProofs);
+    // Returns array of proof states
+    const proofStates = await wallet.checkProofsStates(cashuProofs);
+
+    // Map to boolean array (true = spendable/unspent)
+    const spendable = proofStates.map(state => state.state === 'UNSPENT');
 
     // Calculate total of still-spendable proofs
     const total = proofs
@@ -1376,15 +1366,15 @@ export class CashuWalletService {
     // Get total balance at this mint
     const balance = this.proofRepo.getBalance(mintUrl);
 
-    // Get count of unspent proofs
-    const proofs = this.proofRepo.getAll({ mintUrl, state: ProofState.UNSPENT });
+    // Get count of unspent proofs (using sync method)
+    const proofCount = this.proofRepo.getProofCount(mintUrl);
 
     // Get OCR-specific balance
     const ocrBalance = this.proofRepo.getOCRBalance();
 
     return {
       balance,
-      proofCount: proofs.length,
+      proofCount,
       ocrBalance,
     };
   }
@@ -1403,4 +1393,4 @@ export class CashuWalletService {
  * const balance = cashuService.getWalletInfo(mintUrl);
  * ```
  */
-export default CashuWalletService.getInstance();
+export default CashuWalletService;

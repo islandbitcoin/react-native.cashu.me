@@ -457,4 +457,4 @@ export class ConflictResolver {
 /**
  * Singleton instance export
  */
-export default ConflictResolver.getInstance();
+export default ConflictResolver;

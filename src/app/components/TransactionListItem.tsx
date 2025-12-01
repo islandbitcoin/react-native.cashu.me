@@ -41,9 +41,9 @@ export function TransactionListItem({
 
   const statusColors: Record<TransactionStatus, string> = {
     [TransactionStatus.PENDING]: theme.colors.semantic.pending,
+    [TransactionStatus.PROCESSING]: theme.colors.semantic.pending,
     [TransactionStatus.COMPLETED]: theme.colors.status.success,
     [TransactionStatus.FAILED]: theme.colors.status.error,
-    [TransactionStatus.CANCELLED]: theme.colors.text.tertiary,
   };
 
   const statusColor = statusColors[status];
@@ -54,6 +54,7 @@ export function TransactionListItem({
     [TransactionType.MINT]: 'Minted',
     [TransactionType.MELT]: 'Melted',
     [TransactionType.SWAP]: 'Swapped',
+    [TransactionType.LIGHTNING]: 'Lightning',
   };
 
   const typeLabel = typeLabels[type];

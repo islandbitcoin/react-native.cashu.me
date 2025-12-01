@@ -463,4 +463,4 @@ export class NetworkStateProvider {
 /**
  * Singleton instance export
  */
-export default NetworkStateProvider.getInstance();
+export default NetworkStateProvider;

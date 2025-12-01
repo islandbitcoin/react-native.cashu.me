@@ -360,4 +360,4 @@ export class KeyManager {
 /**
  * Singleton instance export
  */
-export default KeyManager.getInstance();
+export default KeyManager;

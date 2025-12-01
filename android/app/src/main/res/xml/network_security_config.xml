@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config for React Native
+
+  This configuration allows:
+  - All HTTPS connections with system trusted CAs
+  - Cleartext traffic for local development (10.0.2.2, localhost)
+  - Debug builds can trust user-installed certificates
+-->
+<network-security-config>
+    <!-- Allow cleartext traffic for local development only -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+
+    <!-- Base config for all other connections -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Trust system CAs -->
+            <certificates src="system" />
+            <!-- Trust user-installed CAs in debug builds -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

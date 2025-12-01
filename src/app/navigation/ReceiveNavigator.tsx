@@ -10,11 +10,17 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ReceiveStackParamList } from './types';
 import { theme } from '../theme';
 
-// Screens
-import ReceiveMainScreen from '../screens/Receive/ReceiveMainScreen';
-import ReceiveAmountScreen from '../screens/Receive/ReceiveAmountScreen';
-import ReceiveQRScreen from '../screens/Receive/ReceiveQRScreen';
-import ReceiveSuccessScreen from '../screens/Receive/ReceiveSuccessScreen';
+// Real Screens
+import { ReceiveScreen } from '../screens/Receive/ReceiveScreen';
+import { MintAddScreen } from '../screens/Mints/MintAddScreen';
+import { MintDiscoveryScreen } from '../screens/Mints/MintDiscoveryScreen';
+
+// Placeholder Screens
+import {
+  ReceiveAmountScreen,
+  ReceiveQRScreen,
+  ReceiveSuccessScreen,
+} from '../screens/PLACEHOLDER_SCREENS';
 
 const Stack = createNativeStackNavigator<ReceiveStackParamList>();
 
@@ -37,7 +43,7 @@ export function ReceiveNavigator() {
     >
       <Stack.Screen
         name="ReceiveMain"
-        component={ReceiveMainScreen}
+        component={ReceiveScreen}
         options={{
           title: 'Receive Payment',
         }}
@@ -65,6 +71,22 @@ export function ReceiveNavigator() {
         options={{
           headerShown: false,
           gestureEnabled: false,
+        }}
+      />
+
+      <Stack.Screen
+        name="MintAdd"
+        component={MintAddScreen}
+        options={{
+          title: 'Add Mint',
+        }}
+      />
+
+      <Stack.Screen
+        name="MintDiscovery"
+        component={MintDiscoveryScreen}
+        options={{
+          title: 'Discover Mints',
         }}
       />
     </Stack.Navigator>

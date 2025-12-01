@@ -10,12 +10,16 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SendStackParamList } from './types';
 import { theme } from '../theme';
 
-// Screens
-import SendMainScreen from '../screens/Send/SendMainScreen';
+// Real Screens
+import { SendScreen } from '../screens/Send/SendScreen';
 import SendAmountScreen from '../screens/Send/SendAmountScreen';
-import SendConfirmScreen from '../screens/Send/SendConfirmScreen';
-import SendTransportScreen from '../screens/Send/SendTransportScreen';
-import SendSuccessScreen from '../screens/Send/SendSuccessScreen';
+
+// Placeholder Screens (to be implemented)
+import {
+  SendConfirmScreen,
+  SendTransportScreen,
+  SendSuccessScreen,
+} from '../screens/PLACEHOLDER_SCREENS';
 
 const Stack = createNativeStackNavigator<SendStackParamList>();
 
@@ -38,7 +42,7 @@ export function SendNavigator() {
     >
       <Stack.Screen
         name="SendMain"
-        component={SendMainScreen}
+        component={SendScreen}
         options={{
           title: 'Send Payment',
         }}

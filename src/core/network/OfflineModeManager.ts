@@ -403,4 +403,4 @@ export class OfflineModeManager {
 /**
  * Singleton instance export
  */
-export default OfflineModeManager.getInstance();
+export default OfflineModeManager;

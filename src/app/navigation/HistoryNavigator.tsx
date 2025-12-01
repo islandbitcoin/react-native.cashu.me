@@ -10,10 +10,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { HistoryStackParamList } from './types';
 import { theme } from '../theme';
 
-// Screens
-import HistoryMainScreen from '../screens/History/HistoryMainScreen';
-import HistoryFilterScreen from '../screens/History/HistoryFilterScreen';
-import TransactionDetailsScreen from '../screens/History/TransactionDetailsScreen';
+// Real Screens
+import { HistoryScreen } from '../screens/History/HistoryScreen';
+
+// Placeholder Screens
+import {
+  HistoryFilterScreen,
+  TransactionDetailsScreen,
+} from '../screens/PLACEHOLDER_SCREENS';
 
 const Stack = createNativeStackNavigator<HistoryStackParamList>();
 
@@ -36,7 +40,7 @@ export function HistoryNavigator() {
     >
       <Stack.Screen
         name="HistoryMain"
-        component={HistoryMainScreen}
+        component={HistoryScreen}
         options={{
           title: 'Transaction History',
         }}

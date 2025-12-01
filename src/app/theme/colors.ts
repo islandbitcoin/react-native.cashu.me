@@ -54,6 +54,10 @@ export const colors = {
     warning: '#F59E0B',      // Amber - Warning states
     error: '#EF4444',        // Red - Error states
     info: '#3B82F6',         // Blue - Info states
+    successBackground: '#10B98120',  // Green with opacity
+    warningBackground: '#F59E0B20',  // Amber with opacity
+    errorBackground: '#EF444420',    // Red with opacity
+    infoBackground: '#3B82F620',     // Blue with opacity
   },
 
   // OCR status colors

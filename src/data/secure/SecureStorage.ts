@@ -249,7 +249,7 @@ export class SecureStorage {
 /**
  * Singleton instance export
  */
-export default SecureStorage.getInstance();
+export default SecureStorage;
 
 /**
  * Create named instances for different services

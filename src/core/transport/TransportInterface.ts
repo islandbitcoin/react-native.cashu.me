@@ -352,4 +352,4 @@ export class TransportManager {
 /**
  * Export singleton instance
  */
-export default TransportManager.getInstance();
+export default TransportManager;

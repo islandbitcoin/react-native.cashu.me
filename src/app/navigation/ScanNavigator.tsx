@@ -10,9 +10,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ScanStackParamList } from './types';
 import { theme } from '../theme';
 
-// Screens
-import ScanMainScreen from '../screens/Scan/ScanMainScreen';
-import ScanResultScreen from '../screens/Scan/ScanResultScreen';
+// Real Screens
+import { ScanScreen } from '../screens/Scan/ScanScreen';
+import { ScanResultScreen } from '../screens/Scan/ScanResultScreen';
 
 const Stack = createNativeStackNavigator<ScanStackParamList>();
 
@@ -35,7 +35,7 @@ export function ScanNavigator() {
     >
       <Stack.Screen
         name="ScanMain"
-        component={ScanMainScreen}
+        component={ScanScreen}
         options={{
           title: 'Scan',
           headerShown: false, // Camera view is full screen

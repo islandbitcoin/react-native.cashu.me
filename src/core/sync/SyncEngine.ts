@@ -2449,4 +2449,4 @@ export class SyncEngine {
  *
  * Both approaches access the same singleton instance.
  */
-export default SyncEngine.getInstance();
+export default SyncEngine;

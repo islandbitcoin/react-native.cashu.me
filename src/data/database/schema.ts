@@ -3,7 +3,7 @@
  * SQLite database structure with offline-first design
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 4;
 
 /**
  * SQL statements to create all tables
@@ -13,6 +13,8 @@ export const createSchema = `
   -- ============================================================================
   -- Proofs Table (eCash Tokens)
   -- ============================================================================
+  -- Note: No foreign key on keyset_id since we may receive proofs from
+  -- keysets we haven't stored locally (e.g., from other wallets)
   CREATE TABLE IF NOT EXISTS proofs (
     id TEXT PRIMARY KEY,
     secret TEXT NOT NULL UNIQUE,
@@ -24,8 +26,7 @@ export const createSchema = `
     is_ocr INTEGER NOT NULL DEFAULT 0,       -- Part of Offline Cash Reserve
     locked_at INTEGER,
     locked_for TEXT,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY (keyset_id) REFERENCES keysets(id)
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
   );
 
   CREATE INDEX IF NOT EXISTS idx_proofs_mint_state ON proofs(mint_url, state);
@@ -85,13 +86,12 @@ export const createSchema = `
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     amount INTEGER NOT NULL,
-    unit TEXT NOT NULL,
     mint_url TEXT NOT NULL,
     status TEXT NOT NULL,
-    token TEXT,  -- Serialized token for sends
+    direction TEXT NOT NULL DEFAULT 'outgoing',
+    payment_request TEXT,
+    proof_count INTEGER NOT NULL DEFAULT 0,
     memo TEXT,
-    transport_method TEXT,  -- 'nfc', 'qr', 'bluetooth', 'lightning', 'online'
-    is_offline INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     completed_at INTEGER
   );
@@ -99,21 +99,42 @@ export const createSchema = `
   CREATE INDEX IF NOT EXISTS idx_transactions_mint_time ON transactions(mint_url, created_at);
   CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
   CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+  CREATE INDEX IF NOT EXISTS idx_transactions_direction ON transactions(direction);
 
   -- ============================================================================
   -- Mints
   -- ============================================================================
   CREATE TABLE IF NOT EXISTS mints (
-    url TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
     name TEXT,
     description TEXT,
-    info TEXT,  -- JSON serialized mint info
-    trusted INTEGER NOT NULL DEFAULT 0,
-    last_synced INTEGER,
+    public_key TEXT,
+    trust_level TEXT NOT NULL DEFAULT 'untrusted',
+    last_synced_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_mints_trusted ON mints(trusted);
+  CREATE INDEX IF NOT EXISTS idx_mints_trust_level ON mints(trust_level);
+  CREATE INDEX IF NOT EXISTS idx_mints_url ON mints(url);
+
+  -- ============================================================================
+  -- Mint Keysets (for MintRepository)
+  -- ============================================================================
+  CREATE TABLE IF NOT EXISTS mint_keysets (
+    id TEXT PRIMARY KEY,
+    mint_id TEXT NOT NULL,
+    keyset_id TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT 'sat',
+    active INTEGER NOT NULL DEFAULT 1,
+    keys TEXT NOT NULL,  -- JSON serialized public keys
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (mint_id) REFERENCES mints(id) ON DELETE CASCADE,
+    UNIQUE(mint_id, keyset_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_mint_keysets_mint ON mint_keysets(mint_id);
+  CREATE INDEX IF NOT EXISTS idx_mint_keysets_active ON mint_keysets(active);
 
   -- ============================================================================
   -- Initialize OCR Config (Singleton)
@@ -130,6 +151,7 @@ export const dropSchema = `
   DROP TABLE IF EXISTS pending_transactions;
   DROP TABLE IF EXISTS proofs;
   DROP TABLE IF EXISTS keysets;
+  DROP TABLE IF EXISTS mint_keysets;
   DROP TABLE IF EXISTS mints;
   DROP TABLE IF EXISTS ocr_config;
 `;

@@ -29,11 +29,16 @@ import ScanNavigator from './ScanNavigator';
 import HistoryNavigator from './HistoryNavigator';
 import SettingsNavigator from './SettingsNavigator';
 
-// Modal Screens
-import OnboardingScreen from '../screens/Onboarding/OnboardingScreen';
-import CreateWalletScreen from '../screens/Onboarding/CreateWalletScreen';
-import ImportWalletScreen from '../screens/Onboarding/ImportWalletScreen';
-import OCRAlertScreen from '../screens/OCR/OCRAlertScreen';
+// Components
+import { TabBarIcon } from '../components/TabBarIcon';
+
+// Modal Screens - use placeholder screens
+import {
+  OnboardingScreen,
+  CreateWalletScreen,
+  ImportWalletScreen,
+  OCRAlertScreen,
+} from '../screens/PLACEHOLDER_SCREENS';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -69,8 +74,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => (
-            // Icon component would go here
-            <></>
+            <TabBarIcon name="home" color={color} size={size} />
           ),
         }}
       />
@@ -81,7 +85,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'Scan',
           tabBarIcon: ({ color, size }) => (
-            <></>
+            <TabBarIcon name="scan" color={color} size={size} />
           ),
         }}
       />
@@ -92,7 +96,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'Send',
           tabBarIcon: ({ color, size }) => (
-            <></>
+            <TabBarIcon name="send" color={color} size={size} />
           ),
         }}
       />
@@ -103,7 +107,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'History',
           tabBarIcon: ({ color, size }) => (
-            <></>
+            <TabBarIcon name="history" color={color} size={size} />
           ),
         }}
       />
@@ -114,7 +118,7 @@ function TabNavigator() {
         options={{
           tabBarLabel: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <></>
+            <TabBarIcon name="settings" color={color} size={size} />
           ),
         }}
       />
@@ -137,6 +141,12 @@ export function RootNavigator() {
           text: theme.colors.text.primary,
           border: theme.colors.border.primary,
           notification: theme.colors.status.error,
+        },
+        fonts: {
+          regular: { fontFamily: theme.fontFamily.regular, fontWeight: '400' },
+          medium: { fontFamily: theme.fontFamily.medium, fontWeight: '500' },
+          bold: { fontFamily: theme.fontFamily.bold, fontWeight: '700' },
+          heavy: { fontFamily: theme.fontFamily.bold, fontWeight: '900' },
         },
       }}
     >

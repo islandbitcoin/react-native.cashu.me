@@ -219,6 +219,18 @@ export class TransactionRepository {
   }
 
   /**
+   * Get transactions potentially associated with a proof ID
+   * Note: This is used by ConflictResolver to find pending transactions
+   * that might need to be failed when a proof conflict is detected.
+   */
+  async getByTransactionId(proofId: string): Promise<Transaction[]> {
+    // Since we don't directly link transactions to specific proofs,
+    // return pending transactions that could be affected
+    // The caller will filter by status
+    return this.getPending();
+  }
+
+  /**
    * Get transactions by type
    */
   async getByType(type: TransactionType, limit?: number): Promise<Transaction[]> {
@@ -586,4 +598,4 @@ export class TransactionRepository {
 /**
  * Singleton instance export
  */
-export default TransactionRepository.getInstance();
+export default TransactionRepository;

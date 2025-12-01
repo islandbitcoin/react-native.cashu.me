@@ -344,13 +344,142 @@ export class Database {
    * Load migration file
    */
   private async loadMigration(version: number): Promise<string | null> {
-    try {
-      // In production, load from migrations folder
-      // For now, return null (no incremental migrations yet)
-      return null;
-    } catch (error) {
-      return null;
-    }
+    // Inline migrations for each version
+    const migrations: Record<number, string> = {
+      2: `
+        -- Migration v2: Update mints table schema and add mint_keysets
+
+        -- Create new mints table with correct schema
+        CREATE TABLE IF NOT EXISTS mints_new (
+          id TEXT PRIMARY KEY,
+          url TEXT NOT NULL UNIQUE,
+          name TEXT,
+          description TEXT,
+          public_key TEXT,
+          trust_level TEXT NOT NULL DEFAULT 'untrusted',
+          last_synced_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        -- Migrate existing data (if any) - generate UUIDs for old records
+        INSERT OR IGNORE INTO mints_new (id, url, name, description, trust_level, created_at)
+        SELECT
+          lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+                substr(hex(randomblob(2)),2) || '-' ||
+                substr('89ab', abs(random()) % 4 + 1, 1) ||
+                substr(hex(randomblob(2)),2) || '-' ||
+                hex(randomblob(6))) as id,
+          url,
+          name,
+          description,
+          CASE WHEN trusted = 1 THEN 'medium' ELSE 'untrusted' END as trust_level,
+          created_at
+        FROM mints;
+
+        -- Drop old table and rename new one
+        DROP TABLE IF EXISTS mints;
+        ALTER TABLE mints_new RENAME TO mints;
+
+        -- Create indexes for mints
+        CREATE INDEX IF NOT EXISTS idx_mints_trust_level ON mints(trust_level);
+        CREATE INDEX IF NOT EXISTS idx_mints_url ON mints(url);
+
+        -- Create mint_keysets table
+        CREATE TABLE IF NOT EXISTS mint_keysets (
+          id TEXT PRIMARY KEY,
+          mint_id TEXT NOT NULL,
+          keyset_id TEXT NOT NULL,
+          unit TEXT NOT NULL DEFAULT 'sat',
+          active INTEGER NOT NULL DEFAULT 1,
+          keys TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+          FOREIGN KEY (mint_id) REFERENCES mints(id) ON DELETE CASCADE,
+          UNIQUE(mint_id, keyset_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mint_keysets_mint ON mint_keysets(mint_id);
+        CREATE INDEX IF NOT EXISTS idx_mint_keysets_active ON mint_keysets(active);
+      `,
+      3: `
+        -- Migration v3: Update transactions table schema
+
+        -- Create new transactions table with correct schema
+        CREATE TABLE IF NOT EXISTS transactions_new (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          amount INTEGER NOT NULL,
+          mint_url TEXT NOT NULL,
+          status TEXT NOT NULL,
+          direction TEXT NOT NULL DEFAULT 'outgoing',
+          payment_request TEXT,
+          proof_count INTEGER NOT NULL DEFAULT 0,
+          memo TEXT,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+          completed_at INTEGER
+        );
+
+        -- Migrate existing data
+        INSERT OR IGNORE INTO transactions_new (id, type, amount, mint_url, status, direction, memo, created_at, completed_at)
+        SELECT
+          id,
+          type,
+          amount,
+          mint_url,
+          status,
+          'outgoing' as direction,
+          memo,
+          created_at,
+          completed_at
+        FROM transactions;
+
+        -- Drop old table and rename new one
+        DROP TABLE IF EXISTS transactions;
+        ALTER TABLE transactions_new RENAME TO transactions;
+
+        -- Create indexes
+        CREATE INDEX IF NOT EXISTS idx_transactions_mint_time ON transactions(mint_url, created_at);
+        CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+        CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+        CREATE INDEX IF NOT EXISTS idx_transactions_direction ON transactions(direction);
+      `,
+      4: `
+        -- Migration v4: Remove foreign key constraint from proofs table
+        -- The keyset_id FK was causing INSERT failures since we don't always
+        -- have the keyset in our local database (e.g., proofs from other wallets)
+
+        -- Create new proofs table without FK constraint
+        CREATE TABLE IF NOT EXISTS proofs_new (
+          id TEXT PRIMARY KEY,
+          secret TEXT NOT NULL UNIQUE,
+          C TEXT NOT NULL,
+          amount INTEGER NOT NULL,
+          mint_url TEXT NOT NULL,
+          keyset_id TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'unspent',
+          is_ocr INTEGER NOT NULL DEFAULT 0,
+          locked_at INTEGER,
+          locked_for TEXT,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        -- Migrate existing data (if any)
+        INSERT OR IGNORE INTO proofs_new (id, secret, C, amount, mint_url, keyset_id, state, is_ocr, locked_at, locked_for, created_at)
+        SELECT id, secret, C, amount, mint_url, keyset_id, state, is_ocr, locked_at, locked_for, created_at
+        FROM proofs;
+
+        -- Drop old table and rename new one
+        DROP TABLE IF EXISTS proofs;
+        ALTER TABLE proofs_new RENAME TO proofs;
+
+        -- Recreate indexes
+        CREATE INDEX IF NOT EXISTS idx_proofs_mint_state ON proofs(mint_url, state);
+        CREATE INDEX IF NOT EXISTS idx_proofs_keyset ON proofs(keyset_id);
+        CREATE INDEX IF NOT EXISTS idx_proofs_ocr ON proofs(is_ocr, state);
+        CREATE INDEX IF NOT EXISTS idx_proofs_locked ON proofs(locked_for);
+      `,
+    };
+
+    return migrations[version] || null;
   }
 
   /**
@@ -444,6 +573,7 @@ export class Database {
 }
 
 /**
- * Singleton instance export
+ * Export Database class as default
+ * Use Database.getInstance() to get the singleton instance
  */
-export default Database.getInstance();
+export default Database;

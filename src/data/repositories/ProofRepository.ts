@@ -1715,6 +1715,21 @@ export class ProofRepository {
   }
 
   /**
+   * Get count of unspent proofs for a specific mint (sync).
+   *
+   * @param {string} mintUrl - URL of mint to count proofs for
+   * @returns {number} Number of unspent proofs at this mint
+   */
+  getProofCount(mintUrl: string): number {
+    const result = this.db.querySync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM proofs WHERE mint_url = ? AND state = ?`,
+      [mintUrl, ProofState.UNSPENT]
+    );
+
+    return result[0]?.count || 0;
+  }
+
+  /**
    * Release stale locks back to UNSPENT state
    *
    * This is the automatic recovery mechanism for crashed operations.
@@ -2001,7 +2016,7 @@ export class ProofRepository {
  *
  * Both approaches use the same singleton instance.
  */
-export default ProofRepository.getInstance();
+export default ProofRepository;
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════

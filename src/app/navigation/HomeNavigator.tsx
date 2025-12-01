@@ -12,8 +12,7 @@ import { theme } from '../theme';
 
 // Screens
 import HomeScreen from '../screens/Home/HomeScreen';
-import TransactionDetailsScreen from '../screens/History/TransactionDetailsScreen';
-import ProofDetailsScreen from '../screens/Home/ProofDetailsScreen';
+import { TransactionDetailsScreen, ProofDetailsScreen } from '../screens/PLACEHOLDER_SCREENS';
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
 

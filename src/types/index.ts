@@ -74,21 +74,43 @@ export interface OCRConfig {
 // Transaction Types
 // ============================================================================
 
-export type TransactionType = 'send' | 'receive' | 'swap' | 'melt' | 'mint';
-export type TransactionStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export enum TransactionType {
+  SEND = 'send',
+  RECEIVE = 'receive',
+  SWAP = 'swap',
+  MELT = 'melt',
+  MINT = 'mint',
+  LIGHTNING = 'lightning',
+}
+
+export enum TransactionStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+}
+
+export enum TransactionDirection {
+  INCOMING = 'incoming',
+  OUTGOING = 'outgoing',
+}
+
 export type TransportMethod = 'nfc' | 'qr' | 'bluetooth' | 'lightning' | 'online';
 
 export interface Transaction {
   id: string;
   type: TransactionType;
   amount: number;
-  unit: string;  // 'sat', 'usd', etc.
+  unit?: string;  // 'sat', 'usd', etc.
   mintUrl: string;
   status: TransactionStatus;
+  direction?: TransactionDirection;
   token?: string;              // Serialized token for sends
   memo?: string;
+  paymentRequest?: string;     // Lightning invoice
   transportMethod?: TransportMethod;
-  isOffline: boolean;
+  isOffline?: boolean;
+  proofCount?: number;
   createdAt: number;
   completedAt?: number;
 }
@@ -109,9 +131,17 @@ export interface PendingTransaction {
 // Mint Types
 // ============================================================================
 
+export enum TrustLevel {
+  UNTRUSTED = 'untrusted',
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+}
+
 export interface MintKeyset {
   id: string;
-  mintUrl: string;
+  mintId: string;
+  keysetId: string;
   unit: string;
   keys: Record<string, string>;  // denomination -> public key
   active: boolean;
@@ -119,12 +149,16 @@ export interface MintKeyset {
 }
 
 export interface Mint {
+  id: string;
   url: string;
   name?: string;
   description?: string;
+  publicKey?: string;
   info?: MintInfo;
-  trusted: boolean;
-  lastSynced?: number;
+  trustLevel: TrustLevel;
+  trusted?: boolean;  // Legacy field
+  lastSyncedAt?: number;
+  lastSynced?: number;  // Legacy field
   createdAt: number;
 }
 
@@ -191,6 +225,26 @@ export interface SyncState {
   isSyncing: boolean;
   pendingCount: number;
   lastSyncTime: Date | null;
+}
+
+// ============================================================================
+// Melt (Lightning Payment) Types
+// ============================================================================
+
+export interface MeltQuote {
+  quote: string;              // Quote ID from mint
+  amount: number;             // Amount to pay in sats
+  feeReserve: number;         // Fee reserve required
+  state: string;              // Quote state (UNPAID, PENDING, PAID)
+  expiry: number;             // Quote expiry timestamp
+  paymentRequest: string;     // Original Lightning invoice
+}
+
+export interface MeltResult {
+  paid: boolean;              // Whether payment succeeded
+  preimage?: string;          // Payment preimage (proof of payment)
+  change?: Proof[];           // Change proofs returned
+  transactionId: string;      // Local transaction ID
 }
 
 // ============================================================================

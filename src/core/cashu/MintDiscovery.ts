@@ -18,7 +18,8 @@
  * - Caches keysets for offline proof validation
  */
 
-import { CashuMint, GetInfoResponse } from '@cashu/cashu-ts';
+import { CashuMint, GetInfoResponse, MintKeys } from '@cashu/cashu-ts';
+import { Buffer } from 'buffer';
 import MintRepository from '../../data/repositories/MintRepository';
 import { TrustLevel, MintKeyset } from '../../types';
 
@@ -29,9 +30,11 @@ export interface MintInfo {
   url: string;
   name?: string;
   description?: string;
+  descriptionLong?: string;
   publicKey?: string;
   version?: string;
   motd?: string;
+  iconUrl?: string;
   contact?: {
     email?: string;
     nostr?: string;
@@ -143,30 +146,61 @@ export class MintDiscovery {
    * Fetch mint info from /.well-known/cashu endpoint
    */
   async fetchMintInfo(url: string): Promise<MintInfo> {
+    console.log(`[MintDiscovery] Fetching info from: ${url}`);
     try {
       // Check cache first
       const cached = this.discoveryCache.get(url);
       if (cached) {
+        console.log(`[MintDiscovery] Using cached info for: ${url}`);
         return cached;
       }
 
+      // Test raw fetch first to diagnose network issues
+      console.log(`[MintDiscovery] Testing raw fetch to: ${url}/v1/info`);
+      try {
+        const testResponse = await fetch(`${url}/v1/info`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        console.log(`[MintDiscovery] Raw fetch status: ${testResponse.status}`);
+        const testData = await testResponse.json();
+        console.log(`[MintDiscovery] Raw fetch data:`, testData?.name || 'no name');
+      } catch (fetchErr: any) {
+        console.error(`[MintDiscovery] Raw fetch failed:`, fetchErr.message);
+        console.error(`[MintDiscovery] This suggests a network/SSL issue on the device`);
+      }
+
       // Create mint instance
+      console.log(`[MintDiscovery] Creating CashuMint instance for: ${url}`);
       const mint = new CashuMint(url);
 
       // Fetch info
+      console.log(`[MintDiscovery] Calling mint.getInfo()...`);
       const info: GetInfoResponse = await mint.getInfo();
+      console.log(`[MintDiscovery] Got mint info:`, { name: info.name, version: info.version });
+
+      // Get icon_url from response (NUT-06 field)
+      const iconUrl = (info as Record<string, unknown>).icon_url as string | undefined;
+      const descriptionLong = (info as Record<string, unknown>).description_long as string | undefined;
+
+      // Extract contact info - contact is an array of [method, info] tuples or MintContactInfo objects
+      const contactArray = info.contact as unknown as Array<[string, string]> | undefined;
+      const emailContact = contactArray?.find(c => c[0] === 'email');
+      const nostrContact = contactArray?.find(c => c[0] === 'nostr');
 
       const mintInfo: MintInfo = {
         url,
         name: info.name,
         description: info.description,
+        descriptionLong,
         publicKey: info.pubkey,
         version: info.version,
         motd: info.motd,
-        contact: info.contact
+        iconUrl,
+        contact: contactArray
           ? {
-              email: info.contact[0]?.[1],
-              nostr: info.contact[1]?.[1],
+              email: emailContact?.[1],
+              nostr: nostrContact?.[1],
             }
           : undefined,
         nuts: info.nuts,
@@ -182,6 +216,7 @@ export class MintDiscovery {
 
       return mintInfo;
     } catch (error: any) {
+      console.error(`[MintDiscovery] fetchMintInfo failed for ${url}:`, error);
       throw new Error(`Failed to fetch mint info: ${error.message}`);
     }
   }
@@ -202,16 +237,24 @@ export class MintDiscovery {
       // Create mint instance
       const mint = new CashuMint(url);
 
-      // Fetch keysets
-      const keysets = await mint.getKeys();
+      // Fetch keysets - getKeys returns { keysets: MintKeys[] }
+      const keysResponse = await mint.getKeys();
+      const keysets: MintKeys[] = keysResponse.keysets || [];
 
       // Get existing keysets
       const existingKeysets = await this.mintRepo.getKeysets({ mintId });
       const existingKeysetIds = new Set(existingKeysets.map(k => k.keysetId));
 
       // Process each keyset
-      for (const [keysetId, keys] of Object.entries(keysets)) {
+      for (const keyset of keysets) {
+        const keysetId = keyset.id;
         try {
+          // Convert MintKeys to Record<string, string> for storage
+          const keys: Record<string, string> = {};
+          for (const [amount, key] of Object.entries(keyset.keys)) {
+            keys[amount] = key;
+          }
+
           // Check if keyset exists
           const exists = await this.mintRepo.keysetExists(mintId, keysetId);
 
@@ -220,7 +263,7 @@ export class MintDiscovery {
             const existing = await this.mintRepo.getKeysetByKeysetId(mintId, keysetId);
             if (existing) {
               await this.mintRepo.updateKeyset(existing.id, {
-                keys: keys as Record<string, string>,
+                keys,
                 active: true,
               });
               result.updated++;
@@ -230,9 +273,9 @@ export class MintDiscovery {
             await this.mintRepo.createKeyset({
               mintId,
               keysetId,
-              unit: 'sat', // Default to sat, could detect from keys
+              unit: keyset.unit || 'sat',
               active: true,
-              keys: keys as Record<string, string>,
+              keys,
             });
             result.added++;
           }
@@ -344,6 +387,7 @@ export class MintDiscovery {
     responseTime?: number;
     error?: string;
   }> {
+    console.log(`[MintDiscovery] Checking health for: ${url}`);
     const startTime = Date.now();
 
     try {
@@ -351,12 +395,19 @@ export class MintDiscovery {
       await this.fetchMintInfo(url);
 
       const responseTime = Date.now() - startTime;
+      console.log(`[MintDiscovery] Health check SUCCESS for ${url} in ${responseTime}ms`);
 
       return {
         healthy: true,
         responseTime,
       };
     } catch (error: any) {
+      console.error(`[MintDiscovery] Health check FAILED for ${url}:`, error);
+      console.error(`[MintDiscovery] Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        cause: error.cause,
+      });
       return {
         healthy: false,
         error: error.message,
@@ -431,11 +482,15 @@ export class MintDiscovery {
    */
   extractMintFromToken(token: string): string | null {
     try {
-      // Decode token
-      const decoded = atob(token.substring(5)); // Remove 'cashu' prefix
+      // Remove 'cashu' prefix and decode base64
+      const base64Data = token.substring(5);
+      const decoded = Buffer.from(base64Data, 'base64').toString('utf8');
       const parsed = JSON.parse(decoded);
 
-      // Get first mint URL
+      // Support both old format { token: [{mint, proofs}] } and new format { mint, proofs }
+      if (parsed.mint) {
+        return parsed.mint;
+      }
       return parsed.token?.[0]?.mint || null;
     } catch (error) {
       return null;
@@ -499,4 +554,4 @@ export class MintDiscovery {
 /**
  * Singleton instance export
  */
-export default MintDiscovery.getInstance();
+export default MintDiscovery;

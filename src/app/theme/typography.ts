@@ -64,6 +64,7 @@ export const fontSize = {
   xs: 12,
   sm: 13,
   base: 14,
+  md: 15,
   lg: 16,
   xl: 18,
   '2xl': 20,
@@ -87,6 +88,13 @@ export const lineHeight = {
  */
 export const typography = {
   // Display styles (large headings)
+  display: {
+    fontFamily: fontFamily.bold,
+    fontSize: fontSize['5xl'],
+    lineHeight: fontSize['5xl'] * lineHeight.tight,
+    fontWeight: fontWeight.bold,
+  } as TextStyle,
+
   displayLarge: {
     fontFamily: fontFamily.bold,
     fontSize: fontSize['6xl'],
@@ -196,6 +204,13 @@ export const typography = {
     fontFamily: fontFamily.medium,
     fontSize: fontSize.sm,
     lineHeight: fontSize.sm * lineHeight.normal,
+    fontWeight: fontWeight.medium,
+  } as TextStyle,
+
+  labelLarge: {
+    fontFamily: fontFamily.medium,
+    fontSize: fontSize.base,
+    lineHeight: fontSize.base * lineHeight.normal,
     fontWeight: fontWeight.medium,
   } as TextStyle,
 

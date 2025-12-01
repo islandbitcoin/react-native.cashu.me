@@ -573,4 +573,4 @@ export class MintRepository {
 /**
  * Singleton instance export
  */
-export default MintRepository.getInstance();
+export default MintRepository;
